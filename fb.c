@@ -24,6 +24,7 @@ static int fb_buffer_create(fb_t* fb,
 {
 	struct drm_mode_create_dumb create_dumb;
 	struct drm_mode_destroy_dumb destroy_dumb;
+	uint32_t* fb_buffer;
 	int ret;
 
 	memset(&create_dumb, 0, sizeof (create_dumb));
@@ -60,6 +61,13 @@ static int fb_buffer_create(fb_t* fb,
 	}
 
 	*pitch = create_dumb.pitch;
+
+
+	fb_buffer = fb_lock(fb);
+	if (fb_buffer) {
+		memset(fb_buffer, 0, fb->buffer_properties.size);
+		fb_unlock(fb);
+	}
 
 	return 0;
 
