@@ -102,10 +102,12 @@ static void drm_disable_non_main_crtcs(drm_t* drm)
 		drmModeConnector* connector;
 
 		connector = drmModeGetConnector(drm->fd, drm->resources->connectors[i]);
-		crtc = find_crtc_for_connector(drm, connector);
-		if (crtc->crtc_id != drm->crtc->crtc_id)
-			drm_disable_crtc(drm, crtc);
-		drmModeFreeCrtc(crtc);
+		if (connector) {
+			crtc = find_crtc_for_connector(drm, connector);
+			if (crtc->crtc_id != drm->crtc->crtc_id)
+				drm_disable_crtc(drm, crtc);
+			drmModeFreeCrtc(crtc);
+		}
 	}
 }
 
