@@ -10,6 +10,7 @@
 #include <getopt.h>
 #include <libtsm.h>
 #include <memory.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -300,6 +301,7 @@ int main(int argc, char* argv[])
 	int32_t x, y;
 	splash_t* splash;
 	drm_t* drm;
+	struct sigaction sa;
 
 	legacy_print_resolution(argc, argv);
 
@@ -365,6 +367,12 @@ int main(int argc, char* argv[])
 	}
 	/* And PID file. */
 	unlink(FRECON_PID_FILE);
+
+	/* Don't leave zombies behind when children are killed. */
+	sa.sa_flags = SA_NOCLDWAIT;
+	sa.sa_handler = SIG_DFL;
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGCHLD, &sa, NULL);
 
 	if (command_flags.daemon) {
 		int status;
