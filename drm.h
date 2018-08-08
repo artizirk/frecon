@@ -27,6 +27,7 @@ typedef struct _drm_t {
 	bool edid_found;
 	char edid[EDID_SIZE];
 	uint32_t delayed_rmfb_fb_id;
+	bool atomic;
 } drm_t;
 
 drm_t* drm_scan(void);
