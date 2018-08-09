@@ -21,22 +21,15 @@
 
 static drm_t* g_drm = NULL;
 
-static void drm_disable_crtc(drm_t* drm, drmModeCrtc* crtc)
-{
-	if (crtc) {
-		drmModeSetCrtc(drm->fd, crtc->crtc_id, 0, // buffer_id
-			       0, 0,  // x,y
-			       NULL,  // connectors
-			       0,     // connector_count
-			       NULL); // mode
-	}
-}
-
 static int32_t crtc_planes_num(drm_t* drm, int32_t crtc_index)
 {
 	drmModePlanePtr plane;
 	int32_t planes_num = 0;
 	drmModePlaneResPtr plane_resources = drmModeGetPlaneResources(drm->fd);
+
+	if (!plane_resources)
+		return 1; /* Just pretend there is one plane. */
+
 	for (uint32_t p = 0; p < plane_resources->count_planes; p++) {
 		plane = drmModeGetPlane(drm->fd, plane_resources->planes[p]);
 
@@ -49,66 +42,80 @@ static int32_t crtc_planes_num(drm_t* drm, int32_t crtc_index)
 	return planes_num;
 }
 
-static drmModeCrtc* find_crtc_for_connector(drm_t* drm, drmModeConnector* connector)
+static bool get_connector_path(drm_t* drm, uint32_t connector_id, uint32_t* ret_encoder_id, uint32_t* ret_crtc_id)
 {
-	int i, j;
+	drmModeConnector* connector = drmModeGetConnector(drm->fd, connector_id);
 	drmModeEncoder* encoder;
-	int32_t crtc_id;
-	int32_t crtc_planes;
-	int32_t max_crtc_planes;
 
-	if (connector->encoder_id)
-		encoder = drmModeGetEncoder(drm->fd, connector->encoder_id);
-	else
-		encoder = NULL;
+	if (!connector)
+		return false; /* Error. */
 
-	if (encoder && encoder->crtc_id) {
-		crtc_id = encoder->crtc_id;
-		drmModeFreeEncoder(encoder);
-		return drmModeGetCrtc(drm->fd, crtc_id);
+	if (ret_encoder_id)
+		*ret_encoder_id = connector->encoder_id;
+	if (!connector->encoder_id) {
+		drmModeFreeConnector(connector);
+		if (ret_crtc_id)
+			*ret_crtc_id = 0;
+		return true; /* Not connected. */
 	}
 
-	crtc_id = -1;
-	max_crtc_planes = -1;
-	for (i = 0; i < connector->count_encoders; i++) {
-		encoder = drmModeGetEncoder(drm->fd, connector->encoders[i]);
+	encoder = drmModeGetEncoder(drm->fd, connector->encoder_id);
+	if (!encoder) {
+		if (ret_crtc_id)
+			*ret_crtc_id = 0;
+		drmModeFreeConnector(connector);
+		return false; /* Error. */
+	}
+
+	if (ret_crtc_id)
+		*ret_crtc_id = encoder->crtc_id;
+
+	drmModeFreeEncoder(encoder);
+	drmModeFreeConnector(connector);
+	return true; /* Connected. */
+}
+
+/* Find CRTC with most planes for given connector_id. */
+static bool find_crtc_for_connector(drm_t* drm, uint32_t connector_id, uint32_t* ret_crtc_id)
+{
+	int enc;
+	int32_t crtc_id = -1;
+	int32_t max_crtc_planes = -1;
+	drmModeConnector* connector = drmModeGetConnector(drm->fd, connector_id);
+
+	if (!connector)
+		return false;
+
+	for (enc = 0; enc < connector->count_encoders; enc++) {
+		int crtc;
+		drmModeEncoder* encoder = drmModeGetEncoder(drm->fd, connector->encoders[enc]);
 
 		if (encoder) {
-			for (j = 0; j < drm->resources->count_crtcs; j++) {
-				if (!(encoder->possible_crtcs & (1 << j)))
+			for (crtc = 0; crtc < drm->resources->count_crtcs; crtc++) {
+				int32_t crtc_planes;
+
+				if (!(encoder->possible_crtcs & (1 << crtc)))
 					continue;
 
-				crtc_planes = crtc_planes_num(drm, j);
+				crtc_planes = crtc_planes_num(drm, crtc);
 				if (max_crtc_planes < crtc_planes) {
-					crtc_id = drm->resources->crtcs[j];
+					crtc_id = drm->resources->crtcs[crtc];
 					max_crtc_planes = crtc_planes;
 				}
 			}
+
 			drmModeFreeEncoder(encoder);
-			if (crtc_id != -1)
-				return drmModeGetCrtc(drm->fd, crtc_id);
+			if (crtc_id != -1) {
+				if (ret_crtc_id)
+					*ret_crtc_id = crtc_id;
+				drmModeFreeConnector(connector);
+				return true;
+			}
 		}
 	}
 
-	return NULL;
-}
-
-static void drm_disable_non_main_crtcs(drm_t* drm)
-{
-	int i;
-	drmModeCrtc* crtc;
-
-	for (i = 0; i < drm->resources->count_connectors; i++) {
-		drmModeConnector* connector;
-
-		connector = drmModeGetConnector(drm->fd, drm->resources->connectors[i]);
-		if (connector) {
-			crtc = find_crtc_for_connector(drm, connector);
-			if (crtc->crtc_id != drm->crtc->crtc_id)
-				drm_disable_crtc(drm, crtc);
-			drmModeFreeCrtc(crtc);
-		}
-	}
+	drmModeFreeConnector(connector);
+	return false;
 }
 
 static int drm_is_primary_plane(drm_t* drm, uint32_t plane_id)
@@ -144,7 +151,7 @@ static int drm_is_primary_plane(drm_t* drm, uint32_t plane_id)
 }
 
 /* Disable all planes except for primary on crtc we use. */
-static void drm_disable_non_primary_planes(drm_t* drm)
+static void drm_disable_non_primary_planes(drm_t* drm, uint32_t console_crtc_id)
 {
 	int ret;
 
@@ -157,7 +164,7 @@ static void drm_disable_non_primary_planes(drm_t* drm)
 					drm->plane_resources->planes[p]);
 		if (plane) {
 			int primary = drm_is_primary_plane(drm, plane->plane_id);
-			if (!(plane->crtc_id == drm->crtc->crtc_id && primary != 0)) {
+			if (!(plane->crtc_id == console_crtc_id && primary != 0)) {
 				ret = drmModeSetPlane(drm->fd, plane->plane_id, plane->crtc_id,
 						      0, 0,
 						      0, 0,
@@ -165,7 +172,7 @@ static void drm_disable_non_primary_planes(drm_t* drm)
 						      0, 0,
 						      0, 0);
 				if (ret) {
-					LOG(WARNING, "Unable to disable plane: %m");
+					LOG(WARNING, "Unable to disable plane:%d %m", plane->plane_id);
 				}
 			}
 			drmModeFreePlane(plane);
@@ -209,11 +216,14 @@ static drmModeConnector* find_first_connected_connector(drm_t* drm, bool interna
 	return NULL;
 }
 
-static drmModeConnector* find_main_monitor(drm_t* drm, uint32_t* mode_index)
+static bool find_main_monitor(drm_t* drm)
 {
 	int modes;
+	uint32_t console_crtc_id = 0;
 	int lid_state = input_check_lid_state();
 	drmModeConnector* main_monitor_connector = NULL;
+
+	drm->console_connector_id = 0;
 
 	/*
 	 * Find the LVDS/eDP/DSI connectors. Those are the main screens.
@@ -232,18 +242,40 @@ static drmModeConnector* find_main_monitor(drm_t* drm, uint32_t* mode_index)
 	 * If we still didn't find a connector, give up and return.
 	 */
 	if (!main_monitor_connector)
-		return NULL;
+		return false;
 
-	*mode_index = 0;
+	if (!main_monitor_connector->count_modes)
+		return false;
+
+	drm->console_connector_id = main_monitor_connector->connector_id;
+	drm->console_connector_internal = drm_is_internal(main_monitor_connector->connector_type);
+	drm->console_mmWidth = main_monitor_connector->mmWidth;
+	drm->console_mmHeight = main_monitor_connector->mmHeight;
+
 	for (modes = 0; modes < main_monitor_connector->count_modes; modes++) {
 		if (main_monitor_connector->modes[modes].type &
 				DRM_MODE_TYPE_PREFERRED) {
-			*mode_index = modes;
+			drm->console_mode_info = main_monitor_connector->modes[modes];
 			break;
 		}
 	}
+	/* If there was no preferred mode use first one. */
+	if (modes == main_monitor_connector->count_modes)
+		drm->console_mode_info = main_monitor_connector->modes[0];
 
-	return main_monitor_connector;
+	drmModeFreeConnector(main_monitor_connector);
+
+	get_connector_path(drm, drm->console_connector_id, NULL, &console_crtc_id);
+
+	if (!console_crtc_id)
+		/* No existing path, find one. */
+		find_crtc_for_connector(drm, drm->console_connector_id, &console_crtc_id);
+
+	if (!console_crtc_id)
+		/* Cannot find CRTC for connector. We will not be able to use it. */
+		return false;
+
+	return true;
 }
 
 static void drm_clear_rmfb(drm_t* drm)
@@ -261,16 +293,6 @@ static void drm_fini(drm_t* drm)
 
 	if (drm->fd >= 0) {
 		drm_clear_rmfb(drm);
-
-		if (drm->crtc) {
-			drmModeFreeCrtc(drm->crtc);
-			drm->crtc = NULL;
-		}
-
-		if (drm->main_monitor_connector) {
-		drmModeFreeConnector(drm->main_monitor_connector);
-			drm->main_monitor_connector = NULL;
-		}
 
 		if (drm->plane_resources) {
 			drmModeFreePlaneResources(drm->plane_resources);
@@ -295,21 +317,9 @@ static bool drm_equal(drm_t* l, drm_t* r)
 		return true;
 	if ((!l && r) || (l && !r))
 		return false;
-	if (!l->crtc && r->crtc)
-		return false;
-	if (l->crtc && !r->crtc)
-		return false;
-	if (l->crtc && r->crtc)
-		if (l->crtc->crtc_id != r->crtc->crtc_id)
-			return false;
 
-	if (!l->main_monitor_connector && r->main_monitor_connector)
+	if (l->console_connector_id != r->console_connector_id)
 		return false;
-	if (l->main_monitor_connector && !r->main_monitor_connector)
-		return false;
-	if (l->main_monitor_connector && r->main_monitor_connector)
-		if (l->main_monitor_connector->connector_id != r->main_monitor_connector->connector_id)
-			return false;
 	return true;
 }
 
@@ -321,10 +331,10 @@ static int drm_score(drm_t* drm)
 	if (!drm)
 		return -1000000000;
 
-	if (!drm->main_monitor_connector)
+	if (!drm->console_connector_id)
 		return -1000000000;
 
-	if (drm_is_internal(drm->main_monitor_connector->connector_type))
+	if (drm->console_connector_internal)
 		score++;
 
 	version = drmGetVersion(drm->fd);
@@ -381,6 +391,9 @@ try_open_again:
 			goto try_open_again;
 		}
 
+		/* Set universal planes cap if possible. Ignore any errors. */
+		drmSetClientCap(drm->fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
+
 		drm->resources = drmModeGetResources(drm->fd);
 		if (!drm->resources) {
 			drm_fini(drm);
@@ -393,21 +406,13 @@ try_open_again:
 			continue;
 		}
 
-		drm->main_monitor_connector = find_main_monitor(drm, &drm->selected_mode);
-		if (!drm->main_monitor_connector) {
-			drm_fini(drm);
-			continue;
-		}
-
-		drm->crtc = find_crtc_for_connector(drm, drm->main_monitor_connector);
-		if (!drm->crtc) {
-			drm_fini(drm);
-			continue;
-		}
-
-		drm->crtc->mode = drm->main_monitor_connector->modes[drm->selected_mode];
-
 		drm->plane_resources = drmModeGetPlaneResources(drm->fd);
+
+		if (!find_main_monitor(drm)) {
+			drm_fini(drm);
+			continue;
+		}
+
 		drm->refcount = 1;
 
 		if (drm_score(drm) > drm_score(best_drm)) {
@@ -466,7 +471,6 @@ void drm_delref(drm_t* drm)
 		return;
 	}
 
-	LOG(INFO, "Destroying drm device %p", drm);
 	drm_fini(drm);
 }
 
@@ -533,36 +537,79 @@ bool drm_rescan(void)
 }
 
 bool drm_valid(drm_t* drm) {
-	return drm && drm->fd >= 0 && drm->resources && drm->main_monitor_connector && drm->crtc;
+	return drm && drm->fd >= 0 && drm->resources && drm->console_connector_id;
 }
 
 int32_t drm_setmode(drm_t* drm, uint32_t fb_id)
 {
+	int conn;
 	int32_t ret;
+	uint32_t existing_console_crtc_id = 0;
 
-	drm_disable_non_main_crtcs(drm);
+	get_connector_path(drm, drm->console_connector_id, NULL, &existing_console_crtc_id);
 
-	ret = drmModeSetCrtc(drm->fd, drm->crtc->crtc_id,
-			     fb_id,
-			     0, 0,  // x,y
-			     &drm->main_monitor_connector->connector_id,
-			     1,  // connector_count
-			     &drm->crtc->mode); // mode
+	/* Loop through all the connectors, disable ones that are configured and set video mode on console connector. */
+	for (conn = 0; conn < drm->resources->count_connectors; conn++) {
+		uint32_t connector_id = drm->resources->connectors[conn];
 
-	if (ret) {
-		LOG(ERROR, "Unable to set crtc: %m");
-		return ret;
+		if (connector_id == drm->console_connector_id) {
+			uint32_t console_crtc_id = 0;
+
+			if (existing_console_crtc_id)
+				console_crtc_id = existing_console_crtc_id;
+			else {
+				find_crtc_for_connector(drm, connector_id, &console_crtc_id);
+
+				if (!console_crtc_id) {
+					LOG(ERROR, "Could not get console crtc for connector:%d in modeset.\n", drm->console_connector_id);
+					return -ENOENT;
+				}
+			}
+
+			ret = drmModeSetCrtc(drm->fd, console_crtc_id,
+					     fb_id,
+					     0, 0,  // x,y
+					     &drm->console_connector_id,
+					     1,  // connector_count
+					     &drm->console_mode_info); // mode
+
+			if (ret) {
+				LOG(ERROR, "Unable to set crtc:%d connector:%d %m", console_crtc_id, drm->console_connector_id);
+				return ret;
+			}
+
+			ret = drmModeSetCursor(drm->fd, console_crtc_id,
+						0, 0, 0);
+
+			if (ret)
+				LOG(ERROR, "Unable to hide cursor on crtc:%d %m.", console_crtc_id);
+
+			drm_disable_non_primary_planes(drm, console_crtc_id);
+
+		} else {
+			uint32_t crtc_id = 0;
+
+			get_connector_path(drm, connector_id, NULL, &crtc_id);
+			if (!crtc_id)
+				/* This connector is not configured, skip. */
+				continue;
+
+			if (existing_console_crtc_id && existing_console_crtc_id == crtc_id)
+				/* This connector is mirroring from the same CRTC as console. It will be turned off when console is set. */
+				continue;
+
+			ret = drmModeSetCrtc(drm->fd, crtc_id, 0, // buffer_id
+					     0, 0,  // x,y
+					     NULL,  // connectors
+					     0,     // connector_count
+					     NULL); // mode
+			if (ret)
+				LOG(ERROR, "Unable to disable crtc %d: %m", crtc_id);
+		}
 	}
 
-	ret = drmModeSetCursor(drm->fd, drm->crtc->crtc_id,
-			0, 0, 0);
-
-	if (ret)
-		LOG(ERROR, "Unable to hide cursor");
-
-	drm_disable_non_primary_planes(drm);
-
 	drm_clear_rmfb(drm);
+	/* LOG(INFO, "TIMING: Console switch modeset finished."); */
 	return ret;
 }
 
@@ -579,36 +626,44 @@ void drm_rmfb(drm_t* drm, uint32_t fb_id)
 
 bool drm_read_edid(drm_t* drm)
 {
+	drmModeConnector* console_connector;
 	if (drm->edid_found) {
 		return true;
 	}
 
-	for (int i = 0; i < drm->main_monitor_connector->count_props; i++) {
+	console_connector = drmModeGetConnector(drm->fd, drm->console_connector_id);
+
+	if (!console_connector)
+		return false;
+
+	for (int i = 0; i < console_connector->count_props; i++) {
 		drmModePropertyPtr prop;
 		drmModePropertyBlobPtr blob_ptr;
-		prop = drmModeGetProperty(drm->fd, drm->main_monitor_connector->props[i]);
+		prop = drmModeGetProperty(drm->fd, console_connector->props[i]);
 		if (prop) {
 			if (strcmp(prop->name, "EDID") == 0) {
 				blob_ptr = drmModeGetPropertyBlob(drm->fd,
-					drm->main_monitor_connector->prop_values[i]);
+					console_connector->prop_values[i]);
 				if (blob_ptr) {
 					memcpy(&drm->edid, blob_ptr->data, EDID_SIZE);
 					drmModeFreePropertyBlob(blob_ptr);
+					drmModeFreeConnector(console_connector);
 					return (drm->edid_found = true);
 				}
 			}
 		}
 	}
 
+	drmModeFreeConnector(console_connector);
 	return false;
 }
 
 uint32_t drm_gethres(drm_t* drm)
 {
-	return drm->crtc->mode.hdisplay;
+	return drm->console_mode_info.hdisplay;
 }
 
 uint32_t drm_getvres(drm_t* drm)
 {
-	return drm->crtc->mode.vdisplay;
+	return drm->console_mode_info.vdisplay;
 }

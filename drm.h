@@ -19,9 +19,11 @@ typedef struct _drm_t {
 	int fd;
 	drmModeRes* resources;
 	drmModePlaneResPtr plane_resources;
-	drmModeConnector* main_monitor_connector;
-	drmModeCrtc* crtc;
-	uint32_t selected_mode;
+	uint32_t console_connector_id;
+	uint32_t console_mmWidth;
+	uint32_t console_mmHeight;
+	bool console_connector_internal;
+	drmModeModeInfo console_mode_info;
 	bool edid_found;
 	char edid[EDID_SIZE];
 	uint32_t delayed_rmfb_fb_id;

@@ -29,8 +29,8 @@ static int fb_buffer_create(fb_t* fb,
 
 	memset(&create_dumb, 0, sizeof (create_dumb));
 	create_dumb.bpp = 32;
-	create_dumb.width = fb->drm->crtc->mode.hdisplay;
-	create_dumb.height = fb->drm->crtc->mode.vdisplay;
+	create_dumb.width = fb->drm->console_mode_info.hdisplay;
+	create_dumb.height = fb->drm->console_mode_info.vdisplay;
 
 	ret = drmIoctl(fb->drm->fd, DRM_IOCTL_MODE_CREATE_DUMB, &create_dumb);
 	if (ret) {
@@ -52,7 +52,7 @@ static int fb_buffer_create(fb_t* fb,
 	fb->lock.map_offset = map_dumb.offset;
 
 	uint32_t offset = 0;
-	ret = drmModeAddFB2(fb->drm->fd, fb->drm->crtc->mode.hdisplay, fb->drm->crtc->mode.vdisplay,
+	ret = drmModeAddFB2(fb->drm->fd, fb->drm->console_mode_info.hdisplay, fb->drm->console_mode_info.vdisplay,
 			    DRM_FORMAT_XRGB8888, &create_dumb.handle,
 			    &create_dumb.pitch, &offset, &fb->fb_id, 0);
 	if (ret) {
@@ -136,7 +136,7 @@ static bool parse_edid_dtd(uint8_t* dtd, drmModeModeInfo* mode,
 }
 
 static bool parse_edid_dtd_display_size(drm_t* drm, int32_t* hsize_mm, int32_t* vsize_mm) {
-	drmModeModeInfo* mode = &drm->crtc->mode;
+	drmModeModeInfo* mode = &drm->console_mode_info;
 
 	for (int i = 0; i < EDID_N_DTDS; i++) {
 		uint8_t* dtd = (uint8_t*)&drm->edid[EDID_DTD_BASE + i * DTD_SIZE];
@@ -183,8 +183,8 @@ int fb_buffer_init(fb_t* fb)
 		return -ENODEV;
 	}
 
-	width = fb->drm->crtc->mode.hdisplay;
-	height = fb->drm->crtc->mode.vdisplay;
+	width = fb->drm->console_mode_info.hdisplay;
+	height = fb->drm->console_mode_info.vdisplay;
 
 	r = fb_buffer_create(fb, &pitch);
 	if (r < 0) {
@@ -196,8 +196,8 @@ int fb_buffer_init(fb_t* fb)
 	fb->buffer_properties.height = height;
 	fb->buffer_properties.pitch = pitch;
 
-	hsize_mm = fb->drm->main_monitor_connector->mmWidth;
-	vsize_mm = fb->drm->main_monitor_connector->mmHeight;
+	hsize_mm = fb->drm->console_mmWidth;
+	vsize_mm = fb->drm->console_mmHeight;
 	if (drm_read_edid(fb->drm))
 		parse_edid_dtd_display_size(fb->drm, &hsize_mm, &vsize_mm);
 

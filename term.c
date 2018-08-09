@@ -996,6 +996,7 @@ void term_foreground(void)
 		return;
 	in_background = false;
 
+	/* LOG(INFO, "TIMING: Console switch time start."); */ /* Keep around for timing it in the future. */
 	while (!dbus_release_display_ownership() && retry--) {
 		LOG(ERROR, "Chrome did not release master. %s",
 		    retry ? "Trying again." : "Frecon will steal master.");
@@ -1003,6 +1004,7 @@ void term_foreground(void)
 			usleep(500 * 1000);
 	}
 
+	/* LOG(INFO, "TIMING: Console switch setmaster."); */
 	ret = drm_setmaster(NULL);
 	if (ret < 0)
 		LOG(ERROR, "Could not set master when switching to foreground %m.");
