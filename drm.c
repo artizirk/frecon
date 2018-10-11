@@ -21,32 +21,6 @@
 
 static drm_t* g_drm = NULL;
 
-static int32_t atomic_set_prop(drm_t* drm, drmModeAtomicReqPtr pset, uint32_t id,
-				drmModeObjectPropertiesPtr props, const char *name, uint64_t value)
-{
-	uint32_t u;
-	int32_t ret;
-	drmModePropertyPtr prop;
-
-	for (u = 0; u < props->count_props; u++) {
-		prop = drmModeGetProperty(drm->fd, props->props[u]);
-		if (!prop)
-			continue;
-		if (strcmp(prop->name, name)) {
-			drmModeFreeProperty(prop);
-			continue;
-		}
-		ret = drmModeAtomicAddProperty(pset, id, prop->prop_id, value);
-		if (ret < 0) {
-			LOG(ERROR, "setting atomic property %s failed with %d\n", name, ret);
-		}
-		drmModeFreeProperty(prop);
-		return ret;
-	}
-	LOG(ERROR, "could not find atomic property %s\n", name);
-	return -ENOENT;
-}
-
 static int32_t crtc_planes_num(drm_t* drm, int32_t crtc_index)
 {
 	drmModePlanePtr plane;
@@ -391,7 +365,6 @@ drm_t* drm_scan(void)
 	drm_t *best_drm = NULL;
 
 	for (i = 0; i < DRM_MAX_MINOR; i++) {
-		uint64_t atomic = 0;
 		drm_t* drm = calloc(1, sizeof(drm_t));
 
 		if (!drm)
@@ -420,16 +393,6 @@ try_open_again:
 
 		/* Set universal planes cap if possible. Ignore any errors. */
 		drmSetClientCap(drm->fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
-
-		ret = drmGetCap(drm->fd, DRM_CLIENT_CAP_ATOMIC, &atomic);
-		if (!ret && atomic) {
-			drm->atomic = true;
-			ret = drmSetClientCap(drm->fd, DRM_CLIENT_CAP_ATOMIC, 1);
-			if (ret < 0) {
-				LOG(ERROR, "Failed to set atomic cap.");
-				drm->atomic = false;
-			}
-		}
 
 		drm->resources = drmModeGetResources(drm->fd);
 		if (!drm->resources) {
@@ -577,183 +540,11 @@ bool drm_valid(drm_t* drm) {
 	return drm && drm->fd >= 0 && drm->resources && drm->console_connector_id;
 }
 
-static bool is_crtc_possible(drm_t* drm, uint32_t crtc_id, uint32_t mask)
-{
-	int32_t crtc;
-	for (crtc = 0; crtc < drm->resources->count_crtcs; crtc++)
-		if (drm->resources->crtcs[crtc] == crtc_id)
-			return !!(mask & (1u << crtc));
-
-	return false;
-
-}
-
-#define CHECK(fn) do { ret = fn; if (!ret) goto error_mode; } while (0)
-static int32_t drm_setmode_atomic(drm_t* drm, uint32_t fb_id)
-{
-	int32_t ret;
-	int32_t crtc, conn;
-	uint32_t plane;
-	uint32_t console_crtc_id = 0;
-	drmModeObjectPropertiesPtr crtc_props = NULL;
-	drmModeObjectPropertiesPtr plane_props = NULL;
-	drmModeObjectPropertiesPtr conn_props = NULL;
-	drmModePlaneResPtr plane_resources;
-	drmModeAtomicReqPtr pset = NULL;
-	uint32_t mode_id = 0;
-
-	plane_resources = drmModeGetPlaneResources(drm->fd);
-	if (!plane_resources)
-		return -ENOENT;
-
-	get_connector_path(drm, drm->console_connector_id, NULL, &console_crtc_id);
-	if (!console_crtc_id)
-		find_crtc_for_connector(drm, drm->console_connector_id, &console_crtc_id);
-	if (!console_crtc_id) {
-		LOG(ERROR, "Could not get console crtc for connector:%d in modeset.\n", drm->console_connector_id);
-		return -ENOENT;
-	}
-
-	pset = drmModeAtomicAlloc();
-	if (!pset) {
-		ret = -ENOMEM;
-		goto error_mode;
-	}
-
-	for (crtc = 0; crtc < drm->resources->count_crtcs; crtc++) {
-		uint32_t crtc_id = drm->resources->crtcs[crtc];
-
-		crtc_props = drmModeObjectGetProperties(drm->fd, crtc_id, DRM_MODE_OBJECT_CRTC);
-
-		if (!crtc_props) {
-			LOG(ERROR, "Could not query properties for crtc %d %m.", crtc_id);
-			if (crtc_id != console_crtc_id)
-				continue;
-			ret = -ENOENT;
-			goto error_mode;
-		}
-
-		if (crtc_id == console_crtc_id) {
-			CHECK(drmModeCreatePropertyBlob(drm->fd, &drm->console_mode_info,
-							sizeof(drm->console_mode_info),
-							&mode_id));
-
-			/* drm->crtc->mode has been set during init */
-			CHECK(atomic_set_prop(drm, pset, crtc_id, crtc_props, "MODE_ID", mode_id));
-			CHECK(atomic_set_prop(drm, pset, crtc_id, crtc_props, "ACTIVE", 1));
-		} else {
-			CHECK(atomic_set_prop(drm, pset, crtc_id, crtc_props, "MODE_ID", 0));
-			CHECK(atomic_set_prop(drm, pset, crtc_id, crtc_props, "ACTIVE", 0));
-		}
-
-		drmModeFreeObjectProperties(crtc_props);
-	}
-
-	for (plane = 0; plane < plane_resources->count_planes; plane++) {
-		drmModePlanePtr planeobj;
-		uint32_t plane_id = plane_resources->planes[plane];
-		uint32_t possible_crtcs;
-		int primary;
-
-		planeobj = drmModeGetPlane(drm->fd, plane_id);
-		if (!planeobj) {
-			LOG(ERROR, "Could not query plane object for plane %d %m.", plane_id);
-			ret = -ENOENT;
-			goto error_mode;
-		}
-
-		possible_crtcs = planeobj->possible_crtcs;
-		drmModeFreePlane(planeobj);
-
-		primary = drm_is_primary_plane(drm, plane_id);
-
-		plane_props = drmModeObjectGetProperties(drm->fd, plane_id, DRM_MODE_OBJECT_PLANE);
-		if (!plane_props) {
-			LOG(ERROR, "Could not query properties for plane %d %m.", plane_id);
-			ret = -ENOENT;
-			goto error_mode;
-		}
-
-		if (is_crtc_possible(drm, console_crtc_id, possible_crtcs) && primary) {
-			CHECK(atomic_set_prop(drm, pset, plane_id, plane_props, "FB_ID", fb_id));
-			CHECK(atomic_set_prop(drm, pset, plane_id, plane_props, "CRTC_ID", console_crtc_id));
-			CHECK(atomic_set_prop(drm, pset, plane_id, plane_props, "CRTC_X", 0));
-			CHECK(atomic_set_prop(drm, pset, plane_id, plane_props, "CRTC_Y", 0));
-			CHECK(atomic_set_prop(drm, pset, plane_id, plane_props, "CRTC_W", drm->console_mode_info.hdisplay));
-			CHECK(atomic_set_prop(drm, pset, plane_id, plane_props, "CRTC_H", drm->console_mode_info.vdisplay));
-			CHECK(atomic_set_prop(drm, pset, plane_id, plane_props, "SRC_X", 0));
-			CHECK(atomic_set_prop(drm, pset, plane_id, plane_props, "SRC_Y", 0));
-			CHECK(atomic_set_prop(drm, pset, plane_id, plane_props, "SRC_W", drm->console_mode_info.hdisplay << 16));
-			CHECK(atomic_set_prop(drm, pset, plane_id, plane_props, "SRC_H", drm->console_mode_info.vdisplay << 16));
-		} else {
-			CHECK(atomic_set_prop(drm, pset, plane_id, plane_props, "FB_ID", 0));
-			CHECK(atomic_set_prop(drm, pset, plane_id, plane_props, "CRTC_ID", 0));
-		}
-
-		drmModeFreeObjectProperties(plane_props);
-		plane_props = NULL;
-	}
-
-	for (conn = 0; conn < drm->resources->count_connectors; conn++) {
-		uint32_t conn_id = drm->resources->connectors[conn];
-
-		conn_props = drmModeObjectGetProperties(drm->fd, conn_id, DRM_MODE_OBJECT_CONNECTOR);
-		if (!conn_props) {
-			LOG(ERROR, "Could not query properties for connector %d %m.", conn_id);
-			if (conn_id != drm->console_connector_id)
-				continue;
-			ret = -ENOENT;
-			goto error_mode;
-		}
-		if (conn_id == drm->console_connector_id) {
-			CHECK(atomic_set_prop(drm, pset, conn_id, conn_props, "CRTC_ID", console_crtc_id));
-		} else {
-			CHECK(atomic_set_prop(drm, pset, conn_id, conn_props, "CRTC_ID", 0));
-		}
-		drmModeFreeObjectProperties(conn_props);
-		conn_props = NULL;
-	}
-
-	drmModeFreePlaneResources(plane_resources);
-
-	ret = drmModeAtomicCommit(drm->fd, pset,
-				    DRM_MODE_ATOMIC_ALLOW_MODESET , NULL);
-	if (!ret) {
-		drm_clear_rmfb(drm);
-		/* LOG(INFO, "TIMING: Console switch atomic modeset finished."); */
-	}
-
-error_mode:
-	if (mode_id)
-		drmModeDestroyPropertyBlob(drm->fd, mode_id);
-
-	if (plane_resources)
-		drmModeFreePlaneResources(plane_resources);
-
-	if (crtc_props)
-		drmModeFreeObjectProperties(crtc_props);
-
-	if (conn_props)
-		drmModeFreeObjectProperties(conn_props);
-
-	if (plane_props)
-		drmModeFreeObjectProperties(plane_props);
-
-	drmModeAtomicFree(pset);
-	return ret;
-}
-#undef CHECK
-
 int32_t drm_setmode(drm_t* drm, uint32_t fb_id)
 {
 	int conn;
 	int32_t ret;
 	uint32_t existing_console_crtc_id = 0;
-
-	if (drm->atomic)
-		if (drm_setmode_atomic(drm, fb_id) == 0)
-			return 0;
-	       	/* Fallback to legacy mode set. */
 
 	get_connector_path(drm, drm->console_connector_id, NULL, &existing_console_crtc_id);
 
