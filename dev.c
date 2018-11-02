@@ -53,23 +53,12 @@ void dev_close(void)
 	udev_fd = -1;
 }
 
-static bool dev_is_pointer_device(struct udev_device* dev)
+static bool dev_is_keyboard_device(struct udev_device* dev)
 {
-	static const char * const pointer_device_ids[] = {
-		"ID_INPUT_JOYSTICK",
-		"ID_INPUT_MOUSE",
-		"ID_INPUT_TOUCHPAD",
-		"ID_INPUT_TOUCHSCREEN",
-	};
-	unsigned long i;
+	const char *keyboard = udev_device_get_property_value(dev, "ID_INPUT_KEYBOARD");
 
-	for (i = 0; i < ARRAY_SIZE(pointer_device_ids); i++) {
-		const char *value;
-		value = udev_device_get_property_value(dev,
-				pointer_device_ids[i]);
-		if (value && !strcmp(value, "1"))
-			return true;
-	}
+	if (keyboard && !strcmp(keyboard, "1"))
+		return true;
 
 	return false;
 }
@@ -87,7 +76,7 @@ void dev_add_existing_input_devs(void)
 		struct udev_device* dev;
 		syspath = udev_list_entry_get_name(deventry);
 		dev = udev_device_new_from_syspath(udev, syspath);
-		if (!dev_is_pointer_device(dev))
+		if (dev_is_keyboard_device(dev))
 			input_add(udev_device_get_devnode(dev));
 		udev_device_unref(dev);
 	}
@@ -118,7 +107,7 @@ void dev_dispatch_io(fd_set* read_set, fd_set* exception_set)
 		if (dev) {
 			if (!strcmp("input", udev_device_get_subsystem(dev))) {
 				if (!strcmp("add", udev_device_get_action(dev))) {
-					if (!dev_is_pointer_device(dev))
+					if (dev_is_keyboard_device(dev))
 						input_add(udev_device_get_devnode(dev));
 				} else if (!strcmp("remove", udev_device_get_action(dev))) {
 					input_remove(udev_device_get_devnode(dev));
