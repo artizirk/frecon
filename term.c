@@ -461,6 +461,37 @@ static bool term_is_interactive(unsigned int vt)
 	return true;
 }
 
+/*
+ * Set the area not covered by any characters, possibly existing on the right
+ * side and bottom of the screen, to the background color.
+ */
+static void term_clear_border(terminal_t* terminal)
+{
+	uint32_t char_width, char_height;
+	font_get_size(&char_width, &char_height);
+	int32_t width = fb_getwidth(terminal->fb);
+	int32_t height = fb_getheight(terminal->fb);
+	int32_t pitch4 = fb_getpitch(terminal->fb) / 4;
+	uint32_t* fb_buffer = fb_lock(terminal->fb);
+
+	if (fb_buffer) {
+		for (uint32_t y = 0; y < terminal->term->char_y * char_height;
+		     y++) {
+			for (int32_t x = terminal->term->char_x * char_width;
+			     x < width; x++) {
+				fb_buffer[y * pitch4 + x] = terminal->background;
+			}
+		}
+		for (int32_t y = terminal->term->char_y * char_height;
+		     y < height; y++) {
+			for (int32_t x = 0; x < width; x++) {
+				fb_buffer[y * pitch4 + x] = terminal->background;
+			}
+		}
+		fb_unlock(terminal->fb);
+	}
+}
+
 terminal_t* term_init(unsigned vt, int pts_fd)
 {
 	const int scrollback_size = 200;
@@ -774,10 +805,12 @@ int term_create_splash_term(int pts_fd)
 void term_destroy_splash_term(void)
 {
 	terminal_t *terminal;
+	terminal = term_get_terminal(TERM_SPLASH_TERMINAL);
 	if (command_flags.enable_vt1) {
+		term_set_background(terminal, 0);
+		term_clear(terminal);
 		return;
 	}
-	terminal = term_get_terminal(TERM_SPLASH_TERMINAL);
 	term_set_terminal(TERM_SPLASH_TERMINAL, NULL);
 	term_close(terminal);
 }
@@ -922,6 +955,7 @@ void term_redrm(terminal_t* terminal)
 
 void term_clear(terminal_t* terminal)
 {
+	term_clear_border(terminal);
 	tsm_screen_erase_screen(terminal->term->screen, false);
 	term_redraw(terminal);
 }
