@@ -50,7 +50,7 @@ image_t* image_create()
 static void image_rgb(png_struct* png, png_row_info* row_info, png_byte* data)
 {
 	for (unsigned int i = 0; i < row_info->rowbytes; i+= 4) {
-		uint8_t r, g, b, a;
+		uint32_t r, g, b, a;
 		uint32_t pixel;
 
 		r = data[i + 0];
