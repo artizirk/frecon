@@ -12,7 +12,9 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <syslog.h>
 #include <time.h>
+#include <unistd.h>
 
 #define MAX(A, B) ((A) > (B) ? (A) : (B))
 #define MIN(A, B) ((A) < (B) ? (A) : (B))
@@ -30,7 +32,9 @@ inline int64_t get_monotonic_time_ms() {
 	return MS_PER_SEC * spec.tv_sec + spec.tv_nsec / NS_PER_MS;
 }
 
-void LOG(int severity, const char* fmt, ...);
+#define LOG(severity, fmt, ...) (fprintf(stderr, "<%i>frecon[%d]: " fmt "\n", \
+                                         severity, getpid(), ##__VA_ARGS__))
+
 void daemonize(bool wait_child);
 void daemon_exit_code(char code);
 void parse_location(char* loc_str, int* x, int* y);
@@ -43,8 +47,8 @@ void parse_image_option(char* optionstr, char** name, char** val);
 void fix_stdio(void);
 bool write_string_to_file(const char *path, const char *s);
 
-#define ERROR                 (1)
-#define WARNING               (2)
-#define INFO                  (4)
+#define ERROR                 (LOG_ERR)
+#define WARNING               (LOG_WARNING)
+#define INFO                  (LOG_INFO)
 
 #endif

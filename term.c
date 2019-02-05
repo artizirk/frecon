@@ -391,25 +391,6 @@ static void term_osc_cb(struct tsm_vte *vte, const uint32_t *osc_string,
 	free(osc);
 }
 
-static const char* sev2str_table[] = {
-	"FATAL",
-	"ALERT",
-	"CRITICAL",
-	"ERROR",
-	"WARNING",
-	"NOTICE",
-	"INFO",
-	"DEBUG"
-};
-
-static const char* sev2str(unsigned int sev)
-{
-	if (sev > 7)
-		return "DEBUG";
-
-	return sev2str_table[sev];
-}
-
 #ifdef __clang__
 __attribute__((__format__ (__printf__, 7, 0)))
 #endif
@@ -417,9 +398,14 @@ static void log_tsm(void* data, const char* file, int line, const char* fn,
 		    const char* subs, unsigned int sev, const char* format,
 		    va_list args)
 {
-	fprintf(stderr, "%s: %s: ", sev2str(sev), subs);
-	vfprintf(stderr, format, args);
-	fprintf(stderr, "\n");
+	char buffer[KMSG_LINE_MAX];
+	int len = snprintf(buffer, KMSG_LINE_MAX, "<%i>frecon[%d]: %s: ", sev,
+	                   getpid(), subs);
+	if (len < 0)
+		return;
+	if (len < KMSG_LINE_MAX - 1)
+		vsnprintf(buffer+len, KMSG_LINE_MAX - len, format, args);
+	fprintf(stderr, "%s\n", buffer);
 }
 
 static int term_resize(terminal_t* term, int scaling)

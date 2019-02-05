@@ -16,6 +16,12 @@
 
 #define FRECON_VT_PATH FRECON_RUN_DIR "/vt%u"
 
+
+/* Maximum length of buffer than can be passed to /dev/kmsg as defined in kernel
+ * sources. */
+#define KMSG_LINE_MAX		(1024 - 32)
+
+
 extern unsigned int term_num_terminals;
 
 typedef struct _terminal_t terminal_t;
