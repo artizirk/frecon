@@ -805,12 +805,10 @@ int term_create_splash_term(int pts_fd)
 void term_destroy_splash_term(void)
 {
 	terminal_t *terminal;
-	terminal = term_get_terminal(TERM_SPLASH_TERMINAL);
 	if (command_flags.enable_vt1) {
-		term_set_background(terminal, 0);
-		term_clear(terminal);
 		return;
 	}
+	terminal = term_get_terminal(TERM_SPLASH_TERMINAL);
 	term_set_terminal(TERM_SPLASH_TERMINAL, NULL);
 	term_close(terminal);
 }
