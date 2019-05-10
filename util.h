@@ -26,7 +26,7 @@
 #define  NS_PER_MS              (NS_PER_SEC / MS_PER_SEC);
 
 /* Returns the current CLOCK_MONOTONIC time in milliseconds. */
-inline int64_t get_monotonic_time_ms() {
+static inline int64_t get_monotonic_time_ms() {
 	struct timespec spec;
 	clock_gettime(CLOCK_MONOTONIC, &spec);
 	return MS_PER_SEC * spec.tv_sec + spec.tv_nsec / NS_PER_MS;
