@@ -17,6 +17,36 @@ static struct udev* udev = NULL;
 static struct udev_monitor* udev_monitor = NULL;
 static int udev_fd = -1;
 
+static bool dev_is_keyboard_device(struct udev_device* dev)
+{
+	const char *keyboard = udev_device_get_property_value(dev, "ID_INPUT_KEYBOARD");
+
+	if (keyboard && !strcmp(keyboard, "1"))
+		return true;
+
+	return false;
+}
+
+static void dev_add_existing_input_devs(void)
+{
+	struct udev_enumerate* udev_enum;
+	struct udev_list_entry* devices, *deventry;
+	udev_enum = udev_enumerate_new(udev);
+	udev_enumerate_add_match_subsystem(udev_enum, "input");
+	udev_enumerate_scan_devices(udev_enum);
+	devices = udev_enumerate_get_list_entry(udev_enum);
+	udev_list_entry_foreach(deventry, devices) {
+		const char* syspath;
+		struct udev_device* dev;
+		syspath = udev_list_entry_get_name(deventry);
+		dev = udev_device_new_from_syspath(udev, syspath);
+		if (dev_is_keyboard_device(dev))
+			input_add(udev_device_get_devnode(dev));
+		udev_device_unref(dev);
+	}
+	udev_enumerate_unref(udev_enum);
+}
+
 int dev_init(void)
 {
 	udev = udev_new();
@@ -51,36 +81,6 @@ void dev_close(void)
 	udev_unref(udev);
 	udev = NULL;
 	udev_fd = -1;
-}
-
-static bool dev_is_keyboard_device(struct udev_device* dev)
-{
-	const char *keyboard = udev_device_get_property_value(dev, "ID_INPUT_KEYBOARD");
-
-	if (keyboard && !strcmp(keyboard, "1"))
-		return true;
-
-	return false;
-}
-
-void dev_add_existing_input_devs(void)
-{
-	struct udev_enumerate* udev_enum;
-	struct udev_list_entry* devices, *deventry;
-	udev_enum = udev_enumerate_new(udev);
-	udev_enumerate_add_match_subsystem(udev_enum, "input");
-	udev_enumerate_scan_devices(udev_enum);
-	devices = udev_enumerate_get_list_entry(udev_enum);
-	udev_list_entry_foreach(deventry, devices) {
-		const char* syspath;
-		struct udev_device* dev;
-		syspath = udev_list_entry_get_name(deventry);
-		dev = udev_device_new_from_syspath(udev, syspath);
-		if (dev_is_keyboard_device(dev))
-			input_add(udev_device_get_devnode(dev));
-		udev_device_unref(dev);
-	}
-	udev_enumerate_unref(udev_enum);
 }
 
 void dev_add_fds(fd_set* read_set, fd_set* exception_set, int *maxfd)
