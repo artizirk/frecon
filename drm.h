@@ -28,6 +28,7 @@ typedef struct _drm_t {
 	char edid[EDID_SIZE];
 	uint32_t delayed_rmfb_fb_id;
 	bool atomic;
+	int32_t panel_orientation; // DRM_PANEL_ORIENTATION_*
 } drm_t;
 
 drm_t* drm_scan(void);

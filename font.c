@@ -183,25 +183,30 @@ int font_get_scaling()
 	return font_scaling;
 }
 
-void font_fillchar(uint32_t* dst_pointer, int dst_char_x, int dst_char_y,
-		   int32_t pitch, uint32_t front_color, uint32_t back_color)
+void font_fillchar(fb_t *fb, int dst_char_x, int dst_char_y,
+		   uint32_t front_color, uint32_t back_color)
 {
-	int dst_x = dst_char_x * GLYPH_WIDTH * font_scaling;
-	int dst_y = dst_char_y * GLYPH_HEIGHT * font_scaling;
+	fb_stepper_t s;
 
-	for (int j = 0; j < GLYPH_HEIGHT * font_scaling; j++)
-		for (int i = 0; i < GLYPH_WIDTH * font_scaling; i++)
-			dst_pointer[dst_x + i + (dst_y + j) * pitch / 4] =
-			    back_color;
+	fb_stepper_init(&s,
+			fb,
+			dst_char_x * GLYPH_WIDTH * font_scaling,
+			dst_char_y * GLYPH_HEIGHT * font_scaling,
+			GLYPH_WIDTH * font_scaling,
+			GLYPH_HEIGHT * font_scaling);
+
+	do {
+		do {
+		} while (fb_stepper_step_x(&s, back_color));
+	} while (fb_stepper_step_y(&s));
 }
 
-void font_render(uint32_t* dst_pointer, int dst_char_x, int dst_char_y,
-		 int32_t pitch, uint32_t ch, uint32_t front_color,
+void font_render(fb_t *fb, int dst_char_x, int dst_char_y,
+		 uint32_t ch, uint32_t front_color,
 		 uint32_t back_color)
 {
-	int dst_x = dst_char_x * GLYPH_WIDTH * font_scaling;
-	int dst_y = dst_char_y * GLYPH_HEIGHT * font_scaling;
 	int32_t glyph_index = code_point_to_glyph_index(ch);
+	fb_stepper_t s;
 
 	if (glyph_index < 0) {
 		glyph_index = code_point_to_glyph_index(
@@ -211,6 +216,13 @@ void font_render(uint32_t* dst_pointer, int dst_char_x, int dst_char_y,
 		}
 	}
 
+	fb_stepper_init(&s,
+			fb,
+			dst_char_x * GLYPH_WIDTH * font_scaling,
+			dst_char_y * GLYPH_HEIGHT * font_scaling,
+			GLYPH_WIDTH * font_scaling,
+			GLYPH_HEIGHT * font_scaling);
+
 	const uint8_t* glyph;
 	if (font_scaling == 1) {
 		glyph = glyphs[glyph_index];
@@ -218,12 +230,10 @@ void font_render(uint32_t* dst_pointer, int dst_char_x, int dst_char_y,
 		glyph = &prescaled_glyphs[glyph_index * glyph_size];
 	}
 
-	for (int j = 0; j < GLYPH_HEIGHT * font_scaling; j++) {
+	do {
 		const uint8_t* src_row =
-			&glyph[j * GLYPH_BYTES_PER_ROW * font_scaling];
-		for (int i = 0; i < GLYPH_WIDTH * font_scaling; i++) {
-			dst_pointer[dst_x + i + (dst_y + j) * pitch / 4] =
-				get_bit(src_row, i) ? front_color : back_color;
-		}
-	}
+			&glyph[s.y * GLYPH_BYTES_PER_ROW * font_scaling];
+		do {
+		} while (fb_stepper_step_x(&s, get_bit(src_row, s.x) ? front_color : back_color));
+	} while (fb_stepper_step_y(&s));
 }

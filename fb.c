@@ -62,7 +62,6 @@ static int fb_buffer_create(fb_t* fb,
 
 	*pitch = create_dumb.pitch;
 
-
 	fb_buffer = fb_lock(fb);
 	if (fb_buffer) {
 		memset(fb_buffer, 0, fb->buffer_properties.size);
@@ -196,6 +195,28 @@ int fb_buffer_init(fb_t* fb)
 	fb->buffer_properties.height = height;
 	fb->buffer_properties.pitch = pitch;
 
+/*
+	for reference, since it is not available in headers right now
+	DRM_MODE_PANEL_ORIENTATION_UNKNOWN = -1,
+	DRM_MODE_PANEL_ORIENTATION_NORMAL = 0,
+	DRM_MODE_PANEL_ORIENTATION_BOTTOM_UP,
+	DRM_MODE_PANEL_ORIENTATION_LEFT_UP,
+	DRM_MODE_PANEL_ORIENTATION_RIGHT_UP,
+*/
+	switch (fb->drm->panel_orientation) {
+		case 1:
+			fb->buffer_properties.rotation = DRM_MODE_ROTATE_180;
+			break;
+		case 2:
+			fb->buffer_properties.rotation = DRM_MODE_ROTATE_270;
+			break;
+		case 3:
+			fb->buffer_properties.rotation = DRM_MODE_ROTATE_90;
+			break;
+		default:
+			fb->buffer_properties.rotation = DRM_MODE_ROTATE_0;
+	}
+
 	hsize_mm = fb->drm->console_mmWidth;
 	vsize_mm = fb->drm->console_mmHeight;
 	if (drm_read_edid(fb->drm))
@@ -285,20 +306,108 @@ void fb_unlock(fb_t* fb)
 
 int32_t fb_getwidth(fb_t* fb)
 {
-	return fb->buffer_properties.width;
+	switch (fb->buffer_properties.rotation) {
+		case DRM_MODE_ROTATE_90:
+		case DRM_MODE_ROTATE_270:
+			return fb->buffer_properties.height;
+			break;
+		case DRM_MODE_ROTATE_0:
+		case DRM_MODE_ROTATE_180:
+		default:
+			return fb->buffer_properties.width;
+	}
 }
 
 int32_t fb_getheight(fb_t* fb)
 {
-	return fb->buffer_properties.height;
-}
-
-int32_t fb_getpitch(fb_t* fb)
-{
-	return fb->buffer_properties.pitch;
+	switch (fb->buffer_properties.rotation) {
+		case DRM_MODE_ROTATE_90:
+		case DRM_MODE_ROTATE_270:
+			return fb->buffer_properties.width;
+			break;
+		case DRM_MODE_ROTATE_0:
+		case DRM_MODE_ROTATE_180:
+		default:
+			return fb->buffer_properties.height;
+	}
 }
 
 int32_t fb_getscaling(fb_t* fb)
 {
 	return fb->buffer_properties.scaling;
+}
+
+bool
+fb_stepper_init(fb_stepper_t *s, fb_t *fb, int32_t x, int32_t y, uint32_t width, uint32_t height)
+{
+	s->fb = fb;
+	s->start_x = x;
+	s->start_y = y;
+	s->w = width;
+	s->h = height;
+	s->x = 0;
+	s->y = 0;
+	s->pitch_div_4 = s->fb->buffer_properties.pitch >> 2;
+
+	/* quick check if whole rect is outside fb */
+	if (x + width <= 0 || y + height <= 0)
+		return false;
+
+	switch (s->fb->buffer_properties.rotation) {
+		case DRM_MODE_ROTATE_90:
+		case DRM_MODE_ROTATE_270:
+			s->max_x = s->fb->buffer_properties.height;
+			s->max_y = s->fb->buffer_properties.width;
+			break;
+		case DRM_MODE_ROTATE_180:
+		case DRM_MODE_ROTATE_0:
+		default:
+			s->max_x = s->fb->buffer_properties.width;
+			s->max_y = s->fb->buffer_properties.height;
+	}
+
+	if (x >= s->max_x
+	    || y >= s->max_y)
+		return false;
+
+	switch (s->fb->buffer_properties.rotation) {
+		case DRM_MODE_ROTATE_90:
+			s->m[0][0] = 0;
+			s->m[0][1] = -1;
+			s->m[0][2] = s->fb->buffer_properties.width - 1;
+
+			s->m[1][0] = 1;
+			s->m[1][1] = 0;
+			s->m[1][2] = 0;
+			break;
+		case DRM_MODE_ROTATE_270:
+			s->m[0][0] = 0;
+			s->m[0][1] = 1;
+			s->m[0][2] = 0;
+
+			s->m[1][0] = -1;
+			s->m[1][1] = 0;
+			s->m[1][2] = s->fb->buffer_properties.height - 1;
+			break;
+		case DRM_MODE_ROTATE_180:
+			s->m[0][0] = -1;
+			s->m[0][1] = 0;
+			s->m[0][2] = s->fb->buffer_properties.width - 1;
+
+			s->m[1][0] = 0;
+			s->m[1][1] = -1;
+			s->m[1][2] = s->fb->buffer_properties.height - 1;
+			break;
+		case DRM_MODE_ROTATE_0:
+		default:
+			s->m[0][0] = 1;
+			s->m[0][1] = 0;
+			s->m[0][2] = 0;
+
+			s->m[1][0] = 0;
+			s->m[1][1] = 1;
+			s->m[1][2] = 0;
+	}
+
+	return true;
 }

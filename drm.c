@@ -243,6 +243,37 @@ static drmModeConnector* find_first_connected_connector(drm_t* drm, bool interna
 	return NULL;
 }
 
+static int find_panel_orientation(drm_t *drm)
+{
+	uint32_t p;
+	bool found = false;
+	drmModeObjectPropertiesPtr props;
+
+	props = drmModeObjectGetProperties(drm->fd,
+					   drm->console_connector_id,
+					   DRM_MODE_OBJECT_CONNECTOR);
+	if (!props) {
+		LOG(ERROR, "Unable to get connector properties: %m");
+		return -1;
+	}
+
+	for (p = 0; p < props->count_props && !found; p++) {
+		drmModePropertyPtr prop;
+		prop = drmModeGetProperty(drm->fd, props->props[p]);
+		if (prop) {
+			if (strcmp("panel orientation", prop->name) == 0) {
+				found = true;
+				drm->panel_orientation = (int32_t)(props->prop_values[p]);
+			}
+			drmModeFreeProperty(prop);
+		}
+	}
+
+	drmModeFreeObjectProperties(props);
+	return 0;
+}
+
+
 static bool find_main_monitor(drm_t* drm)
 {
 	int modes;
@@ -289,6 +320,8 @@ static bool find_main_monitor(drm_t* drm)
 	/* If there was no preferred mode use first one. */
 	if (modes == main_monitor_connector->count_modes)
 		drm->console_mode_info = main_monitor_connector->modes[0];
+
+	find_panel_orientation(drm);
 
 	drmModeFreeConnector(main_monitor_connector);
 

@@ -13,6 +13,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include "fb.h"
 #include "image.h"
 #include "util.h"
 
@@ -163,14 +164,11 @@ fail:
 
 int image_show(image_t* image, fb_t* fb)
 {
-	uint32_t* buffer;
+	fb_stepper_t s;
 	int32_t startx, starty;
-	uint32_t pitch4;
-	int32_t x, y, w, h;
-	int32_t ox = 0, oy = 0;
+	uint32_t w, h;
 
-	buffer = fb_lock(fb);
-	if (buffer == NULL)
+	if (fb_lock(fb) == NULL)
 		return -1;
 
 	if (image->use_offset && image->use_location) {
@@ -178,8 +176,8 @@ int image_show(image_t* image, fb_t* fb)
 		image->use_offset = false;
 	}
 
-	w = (int32_t)(image->width * image->scale);
-	h = (int32_t)(image->height * image->scale);
+	w = image->width * image->scale;
+	h = image->height * image->scale;
 
 	if (image->use_location) {
 		startx = image->location_x;
@@ -194,43 +192,15 @@ int image_show(image_t* image, fb_t* fb)
 		starty += image->offset_y * (int32_t)image->scale;
 	}
 
-	pitch4 = fb_getpitch(fb) / 4;
+	if (!fb_stepper_init(&s, fb, startx, starty, w, h))
+		goto done;
 
-	if (startx >= fb_getwidth(fb) || startx + w <= 0)
-		return 0;
+	do {
+		do {
+		} while (fb_stepper_step_x(&s, image->layout.as_pixels[(s.y / image->scale) * (image->pitch >> 2) + (s.x / image->scale)]));
+	} while (fb_stepper_step_y(&s));
 
-	if (starty >= fb_getheight(fb) || starty + h <= 0)
-		return 0;
-
-	if (startx < 0) {
-		ox = -startx;
-		w += startx;
-		startx = 0;
-	}
-
-	if (startx + w > fb_getwidth(fb))
-		w = fb_getwidth(fb) - startx;
-
-	if (starty < 0) {
-		oy = -starty;
-		h += starty;
-		starty = 0;
-	}
-
-	if (starty + h > fb_getheight(fb))
-		h = fb_getheight(fb) - starty;
-
-	for (y = 0; y < h; y++) {
-		uint32_t *o = buffer + (starty + y) * pitch4 + startx;
-		int32_t iy = (oy + y) / image->scale;
-		uint32_t *i = image->layout.as_pixels + iy * (image->pitch >> 2);
-
-		for (x = 0; x < w; x++) {
-			int32_t ix = (ox + x) / image->scale;
-			o[x] = i[ix];
-		}
-	}
-
+done:
 	fb_unlock(fb);
 	return 0;
 }
