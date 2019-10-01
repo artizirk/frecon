@@ -54,7 +54,7 @@ int32_t fb_getheight(fb_t* fb);
 int32_t fb_getscaling(fb_t* fb);
 bool fb_stepper_init(fb_stepper_t *s, fb_t *fb, int32_t x, int32_t y, uint32_t width, uint32_t height);
 
-bool inline fb_stepper_step_x(fb_stepper_t *s, uint32_t rgba)
+bool static inline fb_stepper_step_x(fb_stepper_t *s, uint32_t rgba)
 {
 	int32_t x = s->start_x + s->x;
 	int32_t y = s->start_y + s->y;
