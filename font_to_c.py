@@ -1,4 +1,5 @@
-#!/usr/bin/python2
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -64,12 +65,12 @@ class GlyphSet(object):
         'height': self.height,
         'bpp': self.bytes_per_row
     }
-    out_file.write('''/* This code is generated. Do not edit. */
+    out_file.write("""/* This code is generated. Do not edit. */
 #define GLYPH_WIDTH %(width)s
 #define GLYPH_HEIGHT %(height)s
 #define GLYPH_BYTES_PER_ROW %(bpp)s
 
-''' % glyph_properties)
+""" % glyph_properties)
 
     sorted_glyphs = sorted(self.glyph_map.items())
 
@@ -149,7 +150,6 @@ class BdfState(object):
 
     The line is matched to a pattern and that match is passed to the
     corresponding handler.
-
     """
     line = line.strip()
     for pattern, handler in self.patterns:
@@ -174,7 +174,7 @@ class BdfState(object):
   def HandleDataBITMAP(self, match):
     """Adds data to the bitmap data."""
     row = match.group(0)
-    for c_idx in range(len(row) / 2):
+    for c_idx in range(len(row) // 2):
       c = row[c_idx * 2:(c_idx + 1) * 2]
       if self.current_glyph_data_index >= len(self.current_glyph_data):
         raise Exception('too much glyph data, expected %s' %

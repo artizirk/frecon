@@ -28,7 +28,7 @@ CPPFLAGS += $(PC_CFLAGS) -I$(OUT)
 LDLIBS += $(PC_LIBS)
 
 $(OUT)glyphs.h: $(SRC)/font_to_c.py $(SRC)/ter-u16n.bdf
-	python2 $(SRC)/font_to_c.py $(SRC)/ter-u16n.bdf $(OUT)glyphs.h
+	$(SRC)/font_to_c $(SRC)/ter-u16n.bdf $(OUT)glyphs.h
 
 font.o.depends: $(OUT)glyphs.h
 
