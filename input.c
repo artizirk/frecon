@@ -71,6 +71,7 @@ static bool is_alt_pressed(struct keyboard_state* k)
 	return k->left_alt_state || k->right_alt_state;
 }
 
+/* Return 1 if event is handled. */
 static int input_special_key(struct input_key_event* ev)
 {
 	terminal_t* terminal;
@@ -162,7 +163,7 @@ static int input_special_key(struct input_key_event* ev)
 		if (!(input.kbd_state.search_state ||
 		     is_alt_pressed(&input.kbd_state) ||
 		     is_control_pressed(&input.kbd_state)) &&
-		    ev->value && (ev->code >= KEY_F1) && (ev->code <= KEY_F10)) {
+		    ev->value) {
 			switch (ev->code) {
 				case KEY_F1:
 				case KEY_F2:
@@ -174,32 +175,82 @@ static int input_special_key(struct input_key_event* ev)
 				case KEY_F7:
 					dbus_report_user_activity(USER_ACTIVITY_BRIGHTNESS_DOWN_KEY_PRESS -
 								(ev->code - KEY_F6));
-					break;
+					return 1;
 				case KEY_F8:
 				case KEY_F9:
 				case KEY_F10:
 					break;
+				case KEY_BRIGHTNESSDOWN:
+					dbus_report_user_activity(USER_ACTIVITY_BRIGHTNESS_DOWN_KEY_PRESS);
+					return 1;
+				case KEY_BRIGHTNESSUP:
+					dbus_report_user_activity(USER_ACTIVITY_BRIGHTNESS_UP_KEY_PRESS);
+					return 1;
+				case KEY_MUTE:
+					dbus_report_user_activity(USER_ACTIVITY_VOLUME_MUTE_KEY_PRESS);
+					return 1;
+				case KEY_VOLUMEDOWN:
+					dbus_report_user_activity(USER_ACTIVITY_VOLUME_DOWN_KEY_PRESS);
+					return 1;
+				case KEY_VOLUMEUP:
+					dbus_report_user_activity(USER_ACTIVITY_VOLUME_MUTE_KEY_PRESS);
+					return 1;
 			}
-			return 1;
 		}
 	}
 
+	/*
+	 * Special case for key sequence that is used by Crouton.
+	 * Just explicitly ignore here and do nothing.
+	 * TODO(dbehr) remove it, when dnschneid is cool with it.
+	 */
 	if (command_flags.enable_vts &&
 	    is_alt_pressed(&input.kbd_state) &&
 	    is_control_pressed(&input.kbd_state) &&
+	    is_shift_pressed(&input.kbd_state) &&
+	    (ev->code >= KEY_F1) && (ev->code <= KEY_F10) &&
 	    ev->value) {
-		/*
-		 * Special case for key sequence that is used by external program.   Just
-		 * explicitly ignore here and do nothing.
-		 */
-		if (is_shift_pressed(&input.kbd_state))
-			return 1;
+		return 1;
+	}
+
+	/* Console switching. */
+	if (command_flags.enable_vts &&
+	    is_alt_pressed(&input.kbd_state) &&
+	    is_control_pressed(&input.kbd_state) &&
+	    !is_shift_pressed(&input.kbd_state) &&
+	    ev->value) {
 
 		if ((ev->code >= KEY_F1) && (ev->code < KEY_F1 + term_num_terminals)) {
 			term_switch_to(ev->code - KEY_F1);
+			return 1;
 		}
 
-		return 1;
+		/* No F-keys on Vivaldi keyboards, use action codes that are
+		 * guaranteed to be always there.
+		 */
+		switch (ev->code) {
+			case KEY_BACK:
+				term_switch_to(0);
+				return 1;
+			case KEY_REFRESH:
+				if (term_num_terminals >= 2) {
+					term_switch_to(1);
+					return 1;
+				}
+				break;
+			case KEY_ZOOM:
+				if (term_num_terminals >= 3) {
+					term_switch_to(2);
+					return 1;
+				}
+				break;
+			case KEY_SCALE:
+				if (term_num_terminals >= 4) {
+					term_switch_to(3);
+					return 1;
+				}
+				break;
+		}
 	}
 
 	return 0;
