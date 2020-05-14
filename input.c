@@ -232,6 +232,7 @@ static int input_special_key(struct input_key_event* ev)
 			case KEY_BACK:
 				term_switch_to(0);
 				return 1;
+			case KEY_FORWARD:
 			case KEY_REFRESH:
 				if (term_num_terminals >= 2) {
 					term_switch_to(1);
