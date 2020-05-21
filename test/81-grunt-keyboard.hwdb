@@ -12,7 +12,7 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnGoogle*:pnGrunt:pvr*
  KEYBOARD_KEY_3b=back
  KEYBOARD_KEY_3c=forward
  KEYBOARD_KEY_3d=refresh
- KEYBOARD_KEY_3e=zoom
+ KEYBOARD_KEY_3e=full_screen
  KEYBOARD_KEY_3f=scale
  KEYBOARD_KEY_40=brightnessdown
  KEYBOARD_KEY_41=brightnessup
