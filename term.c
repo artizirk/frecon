@@ -525,8 +525,8 @@ terminal_t* term_init(unsigned vt, int pts_fd)
 		return NULL;
 	}
 
-	if (command_flags.enable_osc)
-		tsm_vte_set_osc_cb(new_terminal->term->vte, term_osc_cb, (void *)new_terminal);
+	//if (command_flags.enable_osc)
+	//	tsm_vte_set_osc_cb(new_terminal->term->vte, term_osc_cb, (void *)new_terminal);
 
 	new_terminal->term->pty_bridge = shl_pty_bridge_new();
 	if (new_terminal->term->pty_bridge < 0) {
